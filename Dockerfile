@@ -11,7 +11,7 @@ COPY crawler-rust/src ./src
 RUN cargo build --release
 
 # Stage 2: Build isolated Python dependency virtualenv
-FROM python:3.11-slim AS python-builder
+FROM python:3.15-slim AS python-builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -23,7 +23,7 @@ RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Stage 3: Hardened non-root runtime serving FastAPI telemetry + crawlers
-FROM python:3.11-slim AS runtime
+FROM python:3.15-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
