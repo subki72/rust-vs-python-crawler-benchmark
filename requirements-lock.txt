@@ -50,5 +50,5 @@ typing-extensions==4.16.0
     #   fastapi
     #   pydantic
     #   pydantic-core
-uvicorn==0.34.0
+uvicorn==0.54.0
     # via rust-vs-python-crawler-benchmark
