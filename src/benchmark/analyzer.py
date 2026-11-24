@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -47,7 +47,7 @@ def parse_jsonl_dataset(file_path: Path) -> DatasetSnapshot:
                     f"Malformed JSON in '{file_path.name}' at line {line_num}: {exc}"
                 ) from exc
             if not isinstance(record, dict):
-                raise ValueError(
+                raise TypeError(
                     f"Expected JSON object in '{file_path.name}' at line {line_num}."
                 )
             record_count += 1
@@ -160,7 +160,7 @@ def build_comparison_report(
     """Assemble a complete timestamped comparison report."""
     summary = compute_comparison_summary(python_metrics, rust_metrics)
     return ComparisonReport(
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=datetime.now(UTC).isoformat(),
         python=python_metrics,
         rust=rust_metrics,
         summary=summary,
