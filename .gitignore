@@ -1,20 +1,34 @@
-# Rust
+# Environment & Secret Files (Never Commit Real Credentials)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Rust Build Artifacts
 target/
 **/target/
+crawler-rust/target/
 Cargo.lock.bak
 *.pdb
 
-# Python
+# Python Cache & Test Artifacts
 __pycache__/
 **/__pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 .venv/
 venv/
 env/
 *.egg-info/
 dist/
 build/
+*.log
 
 # IDE & OS
 .vscode/
