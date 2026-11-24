@@ -1,13 +1,20 @@
+"""CLI entrypoint for the Python asynchronous social data ingestion engine."""
+
 import argparse
 import asyncio
-import os
+import logging
 import sys
 import time
 from pathlib import Path
+
 from crawler import SocialCrawlerPython
+from models import SocialPost
+
+logger = logging.getLogger("crawler.python.main")
 
 
-def parse_arguments() -> argparse.Namespace:
+def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse and validate CLI flags for the Python ingestion runner."""
     parser = argparse.ArgumentParser(
         description="High-throughput Async Social Data Ingestion Engine (Python)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -36,47 +43,68 @@ def parse_arguments() -> argparse.Namespace:
         default=3,
         help="Maximum concurrent network requests",
     )
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.pages < 1 or args.concurrency < 1:
+        parser.error("--pages and --concurrency must be positive integers.")
+    return args
 
 
-async def run() -> None:
-    args = parse_arguments()
-    topics = [t.strip() for t in args.topics.split(",") if t.strip()]
+def _configure_cli_logging() -> None:
+    """Configure leveled logging emitting cleanly to standard output."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+        stream=sys.stdout,
+    )
 
-    print(f"[Python] Starting ingestion pipeline: topics={topics}, pages={args.pages} (50 posts/page)")
+
+def _write_jsonl(output_path: Path, posts: list[SocialPost]) -> Path:
+    """Persist validated posts as line-delimited JSON."""
+    resolved = output_path.resolve()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    with resolved.open("w", encoding="utf-8") as file_handle:
+        for post in posts:
+            file_handle.write(post.model_dump_json() + "\n")
+    return resolved
+
+
+async def run(argv: list[str] | None = None) -> int:
+    """Execute the asynchronous crawl pipeline and persist output records."""
+    _configure_cli_logging()
+    args = parse_arguments(argv)
+    topics = [item.strip() for item in args.topics.split(",") if item.strip()]
+    if not topics:
+        logger.error("No valid topics provided.")
+        return 1
+
+    logger.info("[Python] Starting ingestion pipeline: topics=%s, pages=%d", topics, args.pages)
     start_time = time.perf_counter()
 
-    all_posts = []
+    all_posts: list[SocialPost] = []
     async with SocialCrawlerPython(max_concurrency=args.concurrency) as crawler:
         for topic in topics:
             batch = await crawler.crawl_topic(topic=topic, max_pages=args.pages, hits_per_page=50)
-            print(f"[Python] Finished topic '{topic}': ingested {len(batch)} posts")
+            logger.info("[Python] Finished topic '%s': ingested %d posts", topic, len(batch))
             all_posts.extend(batch)
 
-    elapsed = time.perf_counter() - start_time
-
-    # Persist records as atomic JSON Lines
-    output_path = Path(args.output).resolve()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with output_path.open("w", encoding="utf-8") as file_handle:
-        for post in all_posts:
-            file_handle.write(post.model_dump_json() + "\n")
-
+    elapsed = max(time.perf_counter() - start_time, 0.0)
+    resolved = _write_jsonl(Path(args.output), all_posts)
     throughput = len(all_posts) / elapsed if elapsed > 0 else 0.0
 
-    print("\n" + "-" * 50)
-    print("[Python] Ingestion Summary")
-    print("-" * 50)
-    print(f"Total Posts Ingested : {len(all_posts)}")
-    print(f"Elapsed Time         : {elapsed:.2f} seconds")
-    print(f"Throughput           : {throughput:.2f} posts/second")
-    print(f"Destination          : {output_path}")
+    logger.info(
+        "[Python] Summary: posts=%d, elapsed=%.2fs, throughput=%.2f posts/sec, dest=%s",
+        len(all_posts),
+        elapsed,
+        throughput,
+        resolved,
+    )
+    return 0
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(run())
+        sys.exit(asyncio.run(run()))
     except KeyboardInterrupt:
-        print("\n[Python] Ingestion interrupted by user.")
+        logger.warning("[Python] Ingestion interrupted by user.")
         sys.exit(130)
