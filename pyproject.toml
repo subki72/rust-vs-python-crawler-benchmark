@@ -1,0 +1,45 @@
+[project]
+name = "rust-vs-python-crawler-benchmark"
+version = "1.0.0"
+description = "Polyglot Rust vs Python social data ingestion benchmark, analyzer, and FastAPI telemetry service."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4==4.12.3",
+    "fastapi==0.115.6",
+    "httpx==0.28.1",
+    "psutil==6.1.0",
+    "pydantic==2.10.4",
+    "python-dotenv==1.0.1",
+    "uvicorn==0.34.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "flake8==7.1.1",
+    "pytest==8.3.4",
+    "pytest-cov==6.0.0",
+    "ruff==0.8.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = [".venv", "crawler-rust", "data", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "BLE", "TRY", "RUF", "S"]
+ignore = ["S603", "S607", "TRY003", "TRY400"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["S101", "S105", "S106", "S108"]
+"crawler-python/*.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*"]
