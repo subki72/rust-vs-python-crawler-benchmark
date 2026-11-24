@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ from src.benchmark.schemas import (
     DatasetSnapshot,
     EngineMetrics,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def parse_jsonl_dataset(file_path: Path) -> DatasetSnapshot:
@@ -66,13 +69,18 @@ def parse_jsonl_dataset(file_path: Path) -> DatasetSnapshot:
     )
 
 
-def load_datasets(data_dir: Path) -> list[DatasetSnapshot]:
+def load_datasets(data_dir: Path, *, skip_invalid: bool = False) -> list[DatasetSnapshot]:
     """Load all ``*.jsonl`` snapshots from ``data_dir`` sorted by filename."""
     if not data_dir.exists() or not data_dir.is_dir():
         return []
     snapshots: list[DatasetSnapshot] = []
     for file_path in sorted(data_dir.glob("*.jsonl")):
-        snapshots.append(parse_jsonl_dataset(file_path))
+        try:
+            snapshots.append(parse_jsonl_dataset(file_path))
+        except (OSError, TypeError, ValueError) as exc:
+            if not skip_invalid:
+                raise
+            logger.warning("Skipping invalid JSONL dataset '%s': %s", file_path.name, exc)
     return snapshots
 
 

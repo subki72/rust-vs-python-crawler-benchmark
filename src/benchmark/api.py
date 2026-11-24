@@ -132,7 +132,7 @@ def _resolve_safe_data_file(data_dir: Path, filename: str) -> Path:
 
 def _build_snapshot_report(data_dir: Path) -> ComparisonReport:
     """Build a comparative report from persisted ``data/*.jsonl`` snapshots."""
-    snapshots = load_datasets(data_dir)
+    snapshots = load_datasets(data_dir, skip_invalid=True)
     by_name: dict[str, DatasetSnapshot] = {snap.filename: snap for snap in snapshots}
     py_snap = by_name.get("social_python.jsonl")
     rs_snap = by_name.get("social_rust.jsonl")
@@ -161,7 +161,7 @@ def _resolve_engine_input(
         snapshot = parse_jsonl_dataset(target_path)
     except (ValueError, TypeError) as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail=f"Invalid JSONL dataset '{filename}': {exc}",
         ) from exc
     return metrics_from_dataset(engine_name, snapshot)
@@ -257,7 +257,7 @@ def _register_routes(
         report = build_comparison_report(
             python_metrics=py_metrics,
             rust_metrics=rs_metrics,
-            datasets=load_datasets(settings.data_dir),
+            datasets=load_datasets(settings.data_dir, skip_invalid=True),
         )
         logger.info("Computed engine comparison (record_parity=%s)", report.summary.record_parity)
         return report
