@@ -1,6 +1,11 @@
 # Social Crawler & Ingestion Benchmark: Rust vs. Python
 
-An end-to-end, production-grade data engineering benchmark comparing **Rust** and **Python** for high-throughput social data crawling, schema validation, and persistence.
+[![CI Pipeline](https://github.com/subki72/rust-vs-python-crawler-benchmark/actions/workflows/ci.yml/badge.svg)](https://github.com/subki72/rust-vs-python-crawler-benchmark/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Rust 1.70+](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+An end-to-end polyglot data engineering benchmark and FastAPI telemetry service comparing **Rust** (`tokio` + `reqwest` + `serde`) and **Python** (`asyncio` + `httpx` + `Pydantic v2`) for concurrent social data crawling, schema validation, and JSON Lines persistence.
 
 ---
 
@@ -13,35 +18,40 @@ flowchart TD
     end
 
     subgraph Python_Engine ["Python Ingestion Engine"]
-        P_CLI["CLI Entrypoint\n(main.py)"]
-        P_HTTP["Async HTTP Client\n(httpx + asyncio.Semaphore)"]
+        P_CLI["CLI Entrypoint\n(crawler-python/main.py)"]
+        P_HTTP["Async HTTP Client\n(httpx + Bounded Retries)"]
         P_MODEL["Validation & Serialization\n(Pydantic v2 SocialPost)"]
-        P_OUT[("social_python.jsonl\nAtomic Disk Writes")]
+        P_OUT[("data/social_python.jsonl")]
         P_CLI --> P_HTTP --> API
         P_HTTP --> P_MODEL --> P_OUT
     end
 
     subgraph Rust_Engine ["Rust Ingestion Engine"]
-        R_CLI["CLI Entrypoint\n(main.rs)"]
-        R_HTTP["Non-blocking HTTP Client\n(reqwest + tokio::sync::Semaphore)"]
-        R_MODEL["Zero-copy Deserialization\n(serde_json + SocialPost struct)"]
-        R_OUT[("social_rust.jsonl\nBufWriter Disk Streaming")]
+        R_CLI["CLI Entrypoint\n(crawler-rust/src/main.rs)"]
+        R_HTTP["Async HTTP Client\n(reqwest + tokio Semaphore)"]
+        R_MODEL["Zero-copy Deserialization\n(serde_json + SocialPost)"]
+        R_OUT[("data/social_rust.jsonl")]
         R_CLI --> R_HTTP --> API
         R_HTTP --> R_MODEL --> R_OUT
     end
 
-    subgraph Benchmark_Orchestrator ["Orchestrator"]
-        Runner["benchmark_runner.py\n(Subprocess Lifecycle + psutil RSS Sampler)"]
+    subgraph Orchestration_And_API ["Benchmark Orchestrator & Telemetry Service"]
+        Runner["benchmark_runner.py -> src/benchmark/runner.py\n(Subprocess Lifecycle + psutil RSS Sampler)"]
+        Analyzer["src/benchmark/analyzer.py\n(JSONL Parser & Comparison Ratios)"]
+        API_SVC["src/benchmark/api.py\n(FastAPI /health, /api/v1/results, /api/v1/compare)"]
         Runner -.-> Python_Engine
         Runner -.-> Rust_Engine
+        Analyzer --> API_SVC
+        P_OUT --> Analyzer
+        R_OUT --> Analyzer
     end
 ```
 
 ---
 
-## Live Benchmark Results
+## Baseline Benchmark Results
 
-Tested across **5 technical topics** (`rust`, `python`, `technology`, `ai`, `datascience`) with 3 paginated batches per topic (50 records/batch), yielding **750 social media submissions**:
+Tested across **5 technical topics** (`rust`, `python`, `technology`, `ai`, `datascience`) with 3 paginated batches per topic (50 records/batch), yielding **750 social media submissions** in `data/social_python.jsonl` and `data/social_rust.jsonl`:
 
 | Metric | Python Engine (`httpx` + `pydantic`) | Rust Engine (`reqwest` + `tokio` + `serde`) | Variance / Winner |
 | :--- | :--- | :--- | :--- |
@@ -52,102 +62,93 @@ Tested across **5 technical topics** (`rust`, `python`, `technology`, `ai`, `dat
 
 ---
 
-## Technical Analysis: Why the Disparity?
-
-### 1. Why is Execution Latency Similar? (~12.7s vs ~12.3s)
-The workflow is **Network I/O-Bound**, not CPU-bound:
-- **Network Latency Dominated**: Over 90% of the duration is spent waiting for remote server round-trips over TLS/TCP plus polite inter-request pacing (`100ms`).
-- **Modern Non-blocking Runtimes**: Both Python (`asyncio` + `httpx`) and Rust (`tokio` + `reqwest`) utilize epoll/IOCP kernel event notification. When sockets wait on network packets, CPU consumption in both implementations drops to near zero.
-
-### 2. Why is Memory Consumption Drastically Lower in Rust? (13.3 MB vs 59.1 MB)
-- **Runtime Footprint**: Python requires a dynamic runtime (CPython VM, bytecode interpreter, symbol tables). Merely importing `httpx` and `pydantic` inflates baseline RSS to ~40 MB before the first HTTP packet arrives. Rust compiles directly to raw machine instructions with zero VM overhead (~3 MB base footprint).
-- **Object Representation**: A single numeric integer in Python is a dynamically allocated `PyObject` (~28 bytes + dict pointers + reference count metadata). In Rust, `i64` occupies exactly 8 bytes contiguous in memory.
-- **Garbage Collection vs. Deterministic Deallocation**: Python relies on generational GC and memory arenas (`pymalloc`), holding allocated heap blocks indefinitely. Rust deterministically reclaims memory the exact millisecond an entity exits scope via the `Drop` trait (RAII).
-- **Zero-Copy Deserialization**: Rust's `serde_json` populates tightly-packed structs directly from read buffers without allocating intermediate dynamic dictionary wrappers.
-
----
-
 ## Project Directory Structure
 
-```
-social-crawler-benchmark/
-├── README.md                      # Comprehensive project documentation
-├── benchmark_runner.py            # Automated benchmark harness & RSS profiler
-├── data/                          # Output directory for ingested JSON Lines
-│   ├── social_python.jsonl        # 750 records serialized by Python
-│   └── social_rust.jsonl          # 750 records serialized by Rust
-├── crawler-python/                # Python Ingestion Engine
-│   ├── requirements.txt           # httpx, pydantic, psutil
-│   ├── models.py                  # Pydantic v2 SocialPost domain model
-│   ├── parser.py                  # Defensive JSON response decoder
-│   ├── crawler.py                 # Async client with connection pooling & semaphores
-│   └── main.py                    # Production CLI runner
-└── crawler-rust/                  # Rust Ingestion Engine
-    ├── Cargo.toml                 # Dependencies: tokio, reqwest, serde, anyhow
-    └── src/
-        ├── models.rs              # Strongly-typed serde domain structs
-        ├── parser.rs              # Zero-copy JSON payload extractor
-        ├── crawler.rs             # Tokio async client with bounded semaphore
-        └── main.rs                # BufWriter-accelerated streaming CLI runner
+```text
+rust-vs-python-crawler-benchmark/
+├── .env.example                   # Environment configuration template
+├── .flake8                        # Flake8 linting settings
+├── .gitignore                     # Secret, cache, and build artifact exclusions
+├── .pre-commit-config.yaml        # Local pre-commit validation hooks
+├── CHANGELOG.md                   # Semantic release history
+├── CONTRIBUTING.md                # Contributor standards and checklist
+├── Dockerfile                     # Multi-stage non-root image (Rust + Python API)
+├── LICENSE                        # MIT License
+├── Makefile                       # Single-command lint, test, build, and run targets
+├── README.md                      # Project documentation
+├── SECURITY.md                    # Vulnerability reporting and security controls
+├── benchmark_runner.py            # Backward-compatible CLI wrapper for src.benchmark
+├── docker-compose.yml             # Local container stack definition
+├── pyproject.toml                 # Project metadata, Ruff, and Pytest settings
+├── requirements-lock.txt          # Locked Python dependency snapshot
+├── requirements.txt               # Exact-pinned Python dependencies
+├── uv.lock                        # Cross-platform uv dependency lockfile
+├── crawler-python/                # Python asynchronous ingestion engine
+├── crawler-rust/                  # Rust Tokio asynchronous ingestion engine
+├── data/                          # Persisted JSONL ingestion datasets
+├── docs/
+│   └── RUNBOOK.md                 # Operations & incident response runbook
+├── src/
+│   └── benchmark/
+│       ├── analyzer.py            # JSONL parser & comparative metrics calculator
+│       ├── api.py                 # Hardened FastAPI telemetry & comparison service
+│       ├── config.py              # Validated BenchmarkSettings & structured logging
+│       ├── runner.py              # Subprocess execution & psutil peak RSS sampler
+│       └── schemas.py             # Pydantic v2 contracts & traversal guards
+└── tests/                         # Offline unit & FastAPI integration test suites
 ```
 
 ---
 
-## Getting Started
+## Quickstart & Local Usage
 
 ### Prerequisites
-- **Python**: 3.10+ with `pip`
-- **Rust**: 1.75+ with `cargo`
 
-### 1. Install Python Dependencies
+- **Python**: `3.11+` (`pip` or `uv`)
+- **Rust**: `1.70+` (`cargo`, `rustfmt`, `clippy`)
+- **Docker** (optional, for containerized deployment)
+
+### Setup & Verification via Makefile
+
 ```bash
-cd social-crawler-benchmark/crawler-python
-pip install -r requirements.txt
+# 1. Configure environment (optional overrides)
+cp .env.example .env
+
+# 2. Install Python dependencies
+make install
+
+# 3. Run Python and Rust linters
+make lint
+
+# 4. Run offline test suites (Python Pytest + Rust cargo test)
+make test
+make test-rust
 ```
 
-### 2. Build Rust Release Executable
+### Run the Telemetry API Service
+
 ```bash
-cd ../crawler-rust
-cargo build --release
+make run
+# or via Docker Compose:
+docker compose up --build
 ```
 
-### 3. Run the Comparative Benchmark
-From the `social-crawler-benchmark` root directory:
+Available HTTP endpoints:
+- `GET /health` — Readiness and liveness probe reporting dataset availability.
+- `GET /api/v1/results` — Cached comparative report computed from `data/*.jsonl`.
+- `POST /api/v1/compare` — Compare inline engine telemetry or persisted JSONL filenames.
+
+### Run the Head-to-Head Crawler Benchmark
+
 ```bash
+make run-benchmark
+# or directly:
 python benchmark_runner.py
 ```
 
 ---
 
-## Data Contract (Schema)
+## Data Contract & Governance
 
-Both engines emit atomic, line-delimited JSON (`.jsonl`) adhering to the following schema:
-
-```json
-{
-  "id": "22238335",
-  "title": "Why Discord is switching from Go to Rust",
-  "author": "Sikul",
-  "score": 1582,
-  "num_comments": 642,
-  "url": "https://blog.discordapp.com/why-discord-is-switching-from-go-to-rust-a190bbca2b1f",
-  "created_utc": 1580837440.0,
-  "selftext": null,
-  "category": "rust"
-}
-```
-
----
-
-## Architectural Recommendations for Data Engineering
-
-1. **When to Choose Rust for Ingestion**:
-   - Continuous 24/7 background scraping / polling services running on low-spec cloud VMs (low RAM costs).
-   - High-concurrency pipelines (thousands of simultaneous web sockets or long-polling streams).
-   - Compute-heavy post-processing (HTML DOM sanitization, large-scale regex parsing, compression).
-2. **When to Choose Python for Ingestion**:
-   - Rapid prototyping, exploratory analysis, and fast-changing external schemas.
-   - Downstream ETL pipelines leveraging Pandas, Polars, PySpark, or machine learning model inference.
-3. **The Recommended Hybrid Architecture**:
-   - Deploy **Rust** as the lightweight edge collector/ingestor to persist raw payloads into Parquet / Kafka / S3.
-   - Consume and transform those payloads in **Python** for analytics, feature stores, and AI models.
+Both engines emit line-delimited JSON (`.jsonl`) conforming to the canonical `SocialPost` contract (`id`, `title`, `author`, `score`, `num_comments`, `url`, `created_utc`, `selftext`, `category`).
+See [SECURITY.md](SECURITY.md) for vulnerability reporting, [CONTRIBUTING.md](CONTRIBUTING.md) for PR requirements, and [docs/RUNBOOK.md](docs/RUNBOOK.md) for operational diagnostics.
