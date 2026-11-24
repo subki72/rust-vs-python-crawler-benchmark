@@ -95,27 +95,12 @@ def execute_benchmark(
     output_file: Path | None = None,
     sample_interval: float = DEFAULT_SAMPLE_INTERVAL_SECONDS,
 ) -> EngineMetrics:
-    """Execute a crawler command, profile peak RSS, measure latency, and count records.
-
-    Args:
-        name: Human-readable engine name (e.g. ``Python``, ``Rust``).
-        command: Subprocess argument vector.
-        working_dir: Working directory where the command executes.
-        output_file: Expected JSONL output artifact path.
-        sample_interval: RSS sampling interval in seconds.
-
-    Returns:
-        Structured :class:`EngineMetrics` telemetry.
-
-    Raises:
-        ValueError: If ``command`` is empty or ``sample_interval`` is invalid.
-    """
+    """Execute a crawler command, profile peak RSS, measure latency, and count records."""
     if not command:
         raise ValueError("Benchmark command must not be empty.")
 
     logger.info("Executing %s engine in %s", name, working_dir)
     start_time = time.perf_counter()
-
     proc = subprocess.Popen(
         command,
         cwd=str(working_dir),
@@ -133,7 +118,6 @@ def execute_benchmark(
     resolved_output = output_file or (working_dir.parent / "data" / f"social_{name.lower()}.jsonl")
     total_records = _count_non_empty_lines(resolved_output)
     throughput = round(total_records / elapsed_sec, 4) if elapsed_sec > 0 else 0.0
-
     return EngineMetrics(
         name=name,
         elapsed_sec=round(elapsed_sec, 4),
@@ -185,6 +169,21 @@ def log_comparison_report(report: ComparisonReport) -> None:
     logger.info("=" * 65)
 
 
+def _build_crawler_args(executable: list[str], settings: BenchmarkSettings, output_file: Path) -> list[str]:
+    """Assemble standardized CLI arguments shared by Python and Rust crawlers."""
+    return [
+        *executable,
+        "--topics",
+        settings.topics,
+        "--pages",
+        str(settings.pages),
+        "--concurrency",
+        str(settings.concurrency),
+        "--output",
+        str(output_file),
+    ]
+
+
 def run_full_benchmark(root_dir: Path, settings: BenchmarkSettings) -> ComparisonReport:
     """Build Rust release binary and execute end-to-end Python vs. Rust benchmarks."""
     configure_console_utf8()
@@ -198,43 +197,18 @@ def run_full_benchmark(root_dir: Path, settings: BenchmarkSettings) -> Compariso
 
     py_metrics = execute_benchmark(
         name="Python",
-        command=[
-            sys.executable,
-            "main.py",
-            "--topics",
-            settings.topics,
-            "--pages",
-            str(settings.pages),
-            "--concurrency",
-            str(settings.concurrency),
-            "--output",
-            str(py_output),
-        ],
+        command=_build_crawler_args([sys.executable, "main.py"], settings, py_output),
         working_dir=python_dir,
         output_file=py_output,
     )
     rs_metrics = execute_benchmark(
         name="Rust",
-        command=[
-            str(rust_bin),
-            "--topics",
-            settings.topics,
-            "--pages",
-            str(settings.pages),
-            "--concurrency",
-            str(settings.concurrency),
-            "--output",
-            str(rs_output),
-        ],
+        command=_build_crawler_args([str(rust_bin)], settings, rs_output),
         working_dir=rust_dir,
         output_file=rs_output,
     )
 
-    datasets = load_datasets(data_dir)
-    report = build_comparison_report(
-        python_metrics=py_metrics,
-        rust_metrics=rs_metrics,
-        datasets=datasets,
-    )
+    datasets = load_datasets(data_dir, skip_invalid=True)
+    report = build_comparison_report(python_metrics=py_metrics, rust_metrics=rs_metrics, datasets=datasets)
     log_comparison_report(report)
     return report

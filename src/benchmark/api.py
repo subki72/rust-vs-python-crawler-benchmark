@@ -202,12 +202,8 @@ def _register_middlewares(
         return response
 
 
-def _register_routes(
-    app: FastAPI,
-    settings: BenchmarkSettings,
-    cache: ResultCache,
-) -> None:
-    """Register REST endpoints and the centralized exception boundary."""
+def _register_exception_handler(app: FastAPI) -> None:
+    """Attach a global sanitized exception boundary returning HTTP 500 JSON."""
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -217,6 +213,15 @@ def _register_routes(
             content={"detail": "Internal server error."},
             headers=SECURITY_HEADERS,
         )
+
+
+def _register_routes(
+    app: FastAPI,
+    settings: BenchmarkSettings,
+    cache: ResultCache,
+) -> None:
+    """Register REST telemetry and benchmark comparison endpoints."""
+    _register_exception_handler(app)
 
     @app.get("/health", response_model=HealthResponse, tags=["health"])
     def health_check() -> HealthResponse:
@@ -239,21 +244,13 @@ def _register_routes(
             lambda: _build_snapshot_report(settings.data_dir),
         )
         response.headers["X-Cache"] = "HIT" if cache_hit else "MISS"
-        logger.info(
-            "Served /api/v1/results (datasets=%d, cache_hit=%s)",
-            len(report.datasets),
-            cache_hit,
-        )
+        logger.info("Served /api/v1/results (datasets=%d, cache_hit=%s)", len(report.datasets), cache_hit)
         return report
 
     @app.post("/api/v1/compare", response_model=ComparisonReport, tags=["benchmark"])
     def compare_engines(payload: ComparisonRequest) -> ComparisonReport:
-        py_metrics = _resolve_engine_input(
-            "Python", payload.python_metrics, payload.python_file, settings.data_dir
-        )
-        rs_metrics = _resolve_engine_input(
-            "Rust", payload.rust_metrics, payload.rust_file, settings.data_dir
-        )
+        py_metrics = _resolve_engine_input("Python", payload.python_metrics, payload.python_file, settings.data_dir)
+        rs_metrics = _resolve_engine_input("Rust", payload.rust_metrics, payload.rust_file, settings.data_dir)
         report = build_comparison_report(
             python_metrics=py_metrics,
             rust_metrics=rs_metrics,
