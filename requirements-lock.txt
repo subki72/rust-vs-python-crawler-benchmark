@@ -6,7 +6,7 @@ anyio==4.16.0
     # via
     #   httpx
     #   starlette
-beautifulsoup4==4.12.3
+beautifulsoup4==4.15.0
     # via rust-vs-python-crawler-benchmark
 certifi==2026.11.20
     # via
